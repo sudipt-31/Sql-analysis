@@ -13,9 +13,7 @@ build/
 *.egg-info/
 
 # Virtual Environment
-venv/
-env/
-.env/
+
 
 # IDE
 .idea/
