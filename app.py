@@ -25,6 +25,22 @@ st.set_page_config(
 # Load environment variables
 load_dotenv()
 
+def get_api_key():
+    # Try to get from streamlit secrets first
+    try:
+        return st.secrets["GOOGLE_API_KEY"]
+    except:
+        # If not found in secrets, try to get from .env file
+        load_dotenv()
+        api_key = os.getenv("GOOGLE_API_KEY")
+        if api_key:
+            return api_key
+        else:
+            st.error("No API key found. Please set up your GOOGLE_API_KEY in .streamlit/secrets.toml or .env file")
+            return None
+
+
+
 def generate_dataset_specific_topics(df, api_key):
     try:
         genai.configure(api_key=api_key)
@@ -493,7 +509,7 @@ def main():
     
     # Store API key in session state if not already present
     if 'gemini_api_key' not in st.session_state:
-        st.session_state.gemini_api_key = st.secrets["GOOGLE_API_KEY"]
+        st.session_state.gemini_api_key = get_api_key()
 
     # Initialize LLM and prompt template at the start
     if st.session_state.llm is None or st.session_state.prompt_template is None:
