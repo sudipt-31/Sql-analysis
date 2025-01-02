@@ -136,21 +136,12 @@ def generate_subtopic_matching_csv(df, subtopics, output_filename='subtopic_matc
     """
     Generate a CSV file that matches the first column of the dataframe
     against extracted subtopics and removes columns with all zero values.
-    Ensures no repeated column names by adding a unique identifier.
-   
-    Args:
-        df (pandas.DataFrame): Original dataframe
-        subtopics (list): List of extracted subtopics
-        output_filename (str): Name of the output CSV file
-   
-    Returns:
-        pandas.DataFrame: Matching matrix dataframe with zero-value columns removed
+    Ensures column names are properly formatted for SQL.
     """
     # Ensure we have a copy of the original dataframe
     original_df = df.copy()
    
     # Create a new dataframe with the first column and subtopic columns
-    # First column becomes the first column of the new dataframe
     first_column_name = df.columns[0]
     matching_df = pd.DataFrame({first_column_name: original_df[first_column_name]})
    
@@ -162,8 +153,8 @@ def generate_subtopic_matching_csv(df, subtopics, output_filename='subtopic_matc
    
     # For each subtopic, create a column and match against all columns
     for subtopic in subtopics:
-        # Generate a unique column name
-        base_column_name = subtopic
+        # Generate a unique column name, preserving spaces but ensuring SQL compatibility
+        base_column_name = subtopic.strip()
         counter = 1
         column_name = base_column_name
         while column_name in used_column_names:
@@ -195,12 +186,9 @@ def generate_subtopic_matching_csv(df, subtopics, output_filename='subtopic_matc
     # Save to CSV
     matching_df.to_csv(output_filename, index=False)
    
-    # Print number of columns removed (if any)
-    original_num_columns = len(columns_to_keep)
-    print(f"Columns removed due to all zero values: {len(subtopics) + 1 - original_num_columns}")
-   
     return matching_df
- 
+
+
 
 ###########################################################
 
@@ -232,9 +220,12 @@ IMPORTANT RULES FOR SQL QUERY GENERATION:
 12. For age calculations use: CAST(CAST(JULIANDAY(CURRENT_TIMESTAMP) - JULIANDAY(CAST(birth_year AS TEXT) || '-01-01') AS INT) / 365 AS INT)
 13. Ensure foreign key relationships are correctly used in JOINs.
 14. Use aggregation functions with actual columns from the correct table.
-15.2. Use table aliases, but **do not use the 'AS' keyword for aliases** (e.g., `uploaded_data ud` instead of `uploaded_data AS ud`).
-16. the SQL query should be able to run in SQLite.
+15. Use table aliases, but **do not use the 'AS' keyword for aliases** (e.g., `uploaded_data ud` instead of `uploaded_data AS ud`).
+16. The SQL query should be able to run in SQLite.
 17. most Don't use this format  ```sql ```  only give me the sql query.
+18. IMPORTANT: When referencing column names that contain spaces or special characters, always wrap them in double quotes ("). For example: "Hair serums", "Product category"
+19. For column names with spaces, use double quotes like this: SELECT "Hair serums" FROM table_name
+
 User Question: {question}
 
 Generate the SQL query that answers this question:
@@ -243,6 +234,8 @@ Generate the SQL query that answers this question:
         input_variables=["question", "schema"],
         template=template
     )
+
+
 
 def setup_llm():
     """Initialize Gemini and chain with dynamic schema"""
@@ -400,6 +393,7 @@ def extract_key_phrases(question: str) -> List[str]:
 def standardize_dataframe(df):
     """
     Standardize DataFrame while preserving original column names and all data.
+    Also ensures column names are properly formatted for SQLite.
     
     Args:
         df: pandas.DataFrame to standardize
@@ -425,6 +419,7 @@ def standardize_dataframe(df):
         return pd.DataFrame()
         
     return df_new
+
 
 def preprocess_excel_file(uploaded_file):
     """
