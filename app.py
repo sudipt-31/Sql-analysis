@@ -241,11 +241,11 @@ def setup_llm():
     """Initialize Gemini and chain with dynamic schema"""
     try:
         llm = ChatGoogleGenerativeAI(
-        model="gemini-1.5-flash",
-        temperature=0,
-        google_api_key=st.secrets["GOOGLE_API_KEY"],
-        convert_system_message_to_human=True
-    )
+            model="gemini-1.5-flash",
+            temperature=0,
+            google_api_key=st.secrets["GOOGLE_API_KEY"],
+            convert_system_message_to_human=True
+        )
         prompt = get_prompt_template()
         return prompt, llm
     except Exception as e:
@@ -532,7 +532,7 @@ def main():
 
     if uploaded_file is not None and not st.session_state.file_processed:
         try:
-            # Process the uploaded file using the new preprocessing function
+            # Process the uploaded file using the preprocessing function
             processed_data = preprocess_excel_file(uploaded_file)
             
             if processed_data is None:
@@ -559,65 +559,77 @@ def main():
                     engine = create_engine(f'sqlite:///{db_name}')
                     
                     # Save each valid sheet as a separate table
+                    table_mappings = {}  # Store original sheet names to table names mapping
                     for sheet_name, sheet_df in valid_sheets.items():
                         if not sheet_df.empty and len(sheet_df.columns) > 0:
                             # Create a valid table name from sheet name
                             table_name = re.sub(r'[^\w]', '_', sheet_name.lower())
                             try:
                                 sheet_df.to_sql(table_name, engine, if_exists='replace', index=False)
+                                table_mappings[sheet_name] = table_name
                                 st.success(f"Created table: {table_name}")
                             except Exception as e:
                                 st.warning(f"Failed to create table for sheet {sheet_name}: {str(e)}")
                     
+                    st.session_state.table_mappings = table_mappings  # Store mappings in session state
+                    st.session_state.matching_df = df_uploaded.copy()
+                    st.session_state.total_columns_added = len(df_uploaded.columns)
+                    
                     engine.dispose()
+                    st.session_state.current_db = db_name
+                    st.success("Database created successfully!")
+                    st.session_state.file_processed = True
+                    st.session_state.is_multi_sheet = True 
+                    
             else:
-                # Single sheet/CSV file
+                # Single sheet/CSV file - proceed with topic generation
                 if processed_data.empty or len(processed_data.columns) == 0:
                     st.error("No valid data found in the file.")
                     return
                 df_uploaded = processed_data
-            
-            # Generate topics only once
-            if not st.session_state.topics_generated:
-                with st.spinner("Extracting dataset topics..."):
-                    topics_text = generate_dataset_specific_topics(df_uploaded, st.session_state.gemini_api_key)
                 
-                if topics_text:
-                    subtopics = [
-                        line.strip().lstrip('- ').strip()
-                        for line in topics_text.split('\n')
-                        if line.strip() and line.strip().startswith('-')
-                    ]
+                # Generate topics only once for single sheet
+                if not st.session_state.topics_generated:
+                    with st.spinner("Extracting dataset topics..."):
+                        topics_text = generate_dataset_specific_topics(df_uploaded, st.session_state.gemini_api_key)
                     
-                    st.session_state.generated_topics = subtopics
-                    st.session_state.topics_generated = True
-                else:
-                    st.error("Could not generate topics from the dataset.")
-                    return
+                    if topics_text:
+                        subtopics = [
+                            line.strip().lstrip('- ').strip()
+                            for line in topics_text.split('\n')
+                            if line.strip() and line.strip().startswith('-')
+                        ]
+                        
+                        st.session_state.generated_topics = subtopics
+                        st.session_state.topics_generated = True
+                        st.session_state.is_multi_sheet = False
+                    else:
+                        st.error("Could not generate topics from the dataset.")
+                        return
 
-            # Generate matching CSV and store DataFrame in session state
-            if st.session_state.generated_topics:
-                with st.spinner("Creating subtopic matching matrix..."):
-                    matching_df = generate_subtopic_matching_csv(
-                        df_uploaded, 
-                        st.session_state.generated_topics, 
-                        st.session_state.subtopic_matching_file
-                    )
-                    st.session_state.matching_df = matching_df.copy()
-                    st.session_state.total_columns_added = len(matching_df.columns) - 1
+                # Generate matching CSV and store DataFrame in session state
+                if st.session_state.generated_topics:
+                    with st.spinner("Creating subtopic matching matrix..."):
+                        matching_df = generate_subtopic_matching_csv(
+                            df_uploaded, 
+                            st.session_state.generated_topics, 
+                            st.session_state.subtopic_matching_file
+                        )
+                        st.session_state.matching_df = matching_df.copy()
+                        st.session_state.total_columns_added = len(matching_df.columns) - 1
 
-            # Create database
-            if os.path.exists(st.session_state.subtopic_matching_file):
-                with st.spinner("Creating database from matching file..."):
-                    db_name = 'subtopic_matching_database.db'
-                    
-                    engine = create_engine(f'sqlite:///{db_name}')
-                    st.session_state.matching_df.to_sql('subtopic_matching', engine, if_exists='replace', index=False)
-                    engine.dispose()
-                    
-                    st.session_state.current_db = db_name
-                    st.success("Database created successfully!")
-                    st.session_state.file_processed = True
+                # Create database
+                if os.path.exists(st.session_state.subtopic_matching_file):
+                    with st.spinner("Creating database from matching file..."):
+                        db_name = 'subtopic_matching_database.db'
+                        
+                        engine = create_engine(f'sqlite:///{db_name}')
+                        st.session_state.matching_df.to_sql('subtopic_matching', engine, if_exists='replace', index=False)
+                        engine.dispose()
+                        
+                        st.session_state.current_db = db_name
+                        st.success("Database created successfully!")
+                        st.session_state.file_processed = True
 
         except Exception as e:
             st.error(f"Error processing file: {str(e)}")
@@ -677,27 +689,46 @@ def main():
                 st.session_state.matching_df.to_sql('subtopic_matching', engine, if_exists='replace', index=False)
                 engine.dispose()
                 
-                # Get updated schema information
+                # Get updated schema information with sample data
                 conn = sqlite3.connect(st.session_state.current_db)
                 cursor = conn.cursor()
                 cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
                 tables = cursor.fetchall()
                 
-                schema_str = ""
+                schema_str = "Available tables and their columns:\n\n"
                 for table in tables:
                     table_name = table[0]
                     cursor.execute(f"PRAGMA table_info({table_name});")
                     columns = cursor.fetchall()
                     
+                    # Add sample data for each table
+                    cursor.execute(f"SELECT * FROM {table_name} LIMIT 1;")
+                    sample_row = cursor.fetchone()
+                    
                     schema_str += f"Table: {table_name}\n"
                     schema_str += "Columns:\n"
-                    for col in columns:
-                        schema_str += f"- {col[1]} ({col[2]})\n"
+                    for i, col in enumerate(columns):
+                        col_name = col[1]
+                        col_type = col[2]
+                        sample_val = sample_row[i] if sample_row else 'NULL'
+                        schema_str += f"- {col_name} ({col_type}) - Sample: {sample_val}\n"
                     schema_str += "\n"
                 
                 conn.close()
 
-                # Generate and execute SQL query
+                # Generate SQL query with enhanced context
+                prompt = f"""
+                Based on the following database schema and question, generate an SQLite query.
+                Use LIKE with wildcards for text searches (e.g., WHERE LOWER(column) LIKE LOWER('%value%')).
+                Only use tables and columns that exist in the schema.
+                Double-quote column names with spaces.
+                
+                Schema:
+                {schema_str}
+                
+                Question: {user_question}
+                """
+
                 response = st.session_state.llm.invoke(st.session_state.prompt_template.format(
                     question=user_question,
                     schema=schema_str
@@ -731,10 +762,11 @@ def main():
                             st.success(f"Results saved to {results_path}")
                     else:
                         st.warning("No results found for this query.")
+                        st.info("Try rephrasing your question using the exact column names from the schema above.")
 
                 except sqlite3.OperationalError as sql_error:
                     st.error(f"SQL Error: {str(sql_error)}")
-                    st.error("Please try rephrasing your question with more specific terms.")
+                    st.info("Please verify the table and column names in your question match the available schema.")
                 except Exception as query_error:
                     st.error(f"Error executing query: {str(query_error)}")
 
@@ -742,10 +774,8 @@ def main():
                 st.error(f"Analysis error: {str(e)}")
                 st.error("Please try rephrasing your question.")
 
-
 if __name__ == "__main__":
     main()
-    
     
     
     
